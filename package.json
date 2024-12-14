@@ -1,0 +1,30 @@
+{
+  "name": "sveltekit-server-functions",
+  "version": "0.1.0",
+  "description": "Allows you to create functions that run on the server in Sveltekit. ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "svelte",
+    "sveltekit",
+    "preprocessor",
+    "server",
+    "functions",
+    "svelte",
+    "server",
+    "functions",
+    "svelte",
+    "server",
+    "actions"
+  ],
+  "author": "Guandor",
+  "license": "MIT",
+  "dependencies": {
+    "estree-walker": "^3.0.0"
+  },
+  "peerDependencies": {
+    "svelte": "^4.0.0"
+  }
+}
