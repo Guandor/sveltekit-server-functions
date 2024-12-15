@@ -1,6 +1,6 @@
 {
   "name": "sveltekit-server-functions",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Allows you to create functions that run on the server in Sveltekit. ",
   "main": "index.js",
   "scripts": {
@@ -25,6 +25,6 @@
     "estree-walker": "^3.0.0"
   },
   "peerDependencies": {
-    "svelte": "^4.0.0"
+    "svelte": ">=4.0.0 <6.0.0"
   }
 }
