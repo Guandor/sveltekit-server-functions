@@ -111,14 +111,14 @@ function generatePaths(functionName, filename) {
   };
 }
 
-// Transforms server function calls to fetch calls and removes original function
 function transformCode(content, serverFunc, routePath) {
+  // First, collect all calls to the server function
   const freshAst = parse(content);
   const calls = findCalls(freshAst, serverFunc.name);
 
   let transformedContent = content;
 
-  // Transform calls from bottom to top to maintain correct positions
+  // Transform all calls to fetch
   calls
     .sort((a, b) => b.start - a.start)
     .forEach((call) => {
@@ -126,6 +126,7 @@ function transformCode(content, serverFunc, routePath) {
         routePath,
         transformedContent.slice(call.arguments.start, call.arguments.end)
       );
+
       transformedContent =
         transformedContent.slice(0, call.start) +
         fetchCall +
@@ -137,6 +138,22 @@ function transformCode(content, serverFunc, routePath) {
     transformedContent.slice(0, serverFunc.start).trimEnd() +
     "\n" +
     transformedContent.slice(serverFunc.end).trimStart();
+
+  // Now that the function is removed, parse again and check for truly used identifiers
+  const finalAst = parse(transformedContent);
+  const usedIdentifiers = collectUsedIdentifiers(finalAst);
+
+  const unusedImports = findUnusedImports(finalAst, usedIdentifiers);
+
+  // Remove unused imports
+  unusedImports
+    .sort((a, b) => b.start - a.start)
+    .forEach((importNode) => {
+      transformedContent =
+        transformedContent.slice(0, importNode.start).trimEnd() +
+        "\n" +
+        transformedContent.slice(importNode.end).trimStart();
+    });
 
   return transformedContent;
 }
@@ -294,4 +311,48 @@ function findCalls(ast, functionName) {
     },
   });
   return calls;
+}
+
+// Helper function to find imports that are no longer used
+function findUnusedImports(ast, usedIdentifiers) {
+  const unusedImports = [];
+  if (ast.instance) {
+    walk(ast.instance.content, {
+      enter(node) {
+        if (node.type === "ImportDeclaration") {
+          const allSpecifiersUnused = node.specifiers.every(
+            (specifier) => !usedIdentifiers.has(specifier.local.name)
+          );
+          if (allSpecifiersUnused) {
+            unusedImports.push({
+              start: node.start,
+              end: node.end,
+            });
+          }
+        }
+      },
+    });
+  }
+  return unusedImports;
+}
+
+function collectUsedIdentifiers(ast) {
+  const identifiers = new Set();
+  if (ast.instance) {
+    walk(ast.instance.content, {
+      enter(node, parent) {
+        // Skip import declarations and their children
+        if (
+          node.type === "ImportDeclaration" ||
+          (parent && parent.type === "ImportDeclaration")
+        ) {
+          return this.skip();
+        }
+        if (node.type === "Identifier") {
+          identifiers.add(node.name);
+        }
+      },
+    });
+  }
+  return identifiers;
 }

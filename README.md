@@ -79,7 +79,6 @@ The preprocessor will automatically:
    - Transforms the original function call into a fetch request
    - Preserves all necessary imports and types
 3. The generated API endpoints handle:
-   - Request validation
    - Parameter parsing
    - Response serialization
    - Error handling
