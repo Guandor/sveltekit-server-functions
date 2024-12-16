@@ -1,11 +1,12 @@
 {
   "name": "sveltekit-server-functions",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "Allows you to create functions that run on the server in Sveltekit. ",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "type": "module",
   "keywords": [
     "svelte",
     "sveltekit",
@@ -19,6 +20,14 @@
     "server",
     "actions"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Guandor/sveltekit-server-functions.git"
+  },
+  "homepage": "https://github.com/Guandor/sveltekit-server-functions#readme",
+  "bugs": {
+    "url": "https://github.com/Guandor/sveltekit-server-functions/issues"
+  },
   "author": "Guandor",
   "license": "MIT",
   "dependencies": {
