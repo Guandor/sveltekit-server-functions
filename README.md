@@ -6,9 +6,9 @@ A SvelteKit preprocessor that automatically transforms server-side functions int
 
 ```javascript
 async function server_getData(id) {
-  // This code runs on the server
-  const data = await db.query("SELECT FROM items WHERE id = ?", [id]);
-  return data;
+	// This code runs on the server
+	const data = await db.query('SELECT FROM items WHERE id = ?', [id]);
+	return data;
 }
 // Use the function as if it were local
 const data = await server_getData(123);
@@ -47,9 +47,9 @@ npm install sveltekit-server-functions
 1. Add the preprocessor to your `svelte.config.js`:
 
 ```javascript
-import serverFunctions from "sveltekit-server-functions";
+import serverFunctions from 'sveltekit-server-functions';
 export default {
-  preprocess: [serverFunctions(), vitePreprocess()],
+	preprocess: [serverFunctions(), vitePreprocess()]
 };
 ```
 
@@ -57,9 +57,9 @@ export default {
 
 ```javascript
 async function server_getData(id) {
-  // This code runs on the server
-  const data = await db.query("SELECT FROM items WHERE id = ?", [id]);
-  return data;
+	// This code runs on the server
+	const data = await db.query('SELECT FROM items WHERE id = ?', [id]);
+	return data;
 }
 // Use the function as if it were local
 const data = await server_getData(123);
@@ -94,29 +94,29 @@ The preprocessor will automatically:
 
 ```svelte
 <script>
-import { db } from '$lib/database';
+	import { db } from '$lib/database';
 
-// Define a server function to create a user
-async function server_createUser(username, email) {
-  // This function runs on the server
-  const user = await db.users.create({
-    username,
-    email,
-    createdAt: new Date()
-  });
-  return user; // Return the created user
-}
+	// Define a server function to create a user
+	async function server_createUser(username, email) {
+		// This function runs on the server
+		const user = await db.users.create({
+			username,
+			email,
+			createdAt: new Date()
+		});
+		return user; // Return the created user
+	}
 
-// Handle form submission
-async function handleSubmit() {
-  try {
-    // Call the server function as if it were local
-    const newUser = await server_createUser('john_doe', 'john@example.com');
-    console.log('User created:', newUser);
-  } catch (error) {
-    console.error('Failed to create user:', error);
-  }
-}
+	// Handle form submission
+	async function handleSubmit() {
+		try {
+			// Call the server function as if it were local
+			const newUser = await server_createUser('john_doe', 'john@example.com');
+			console.log('User created:', newUser);
+		} catch (error) {
+			console.error('Failed to create user:', error);
+		}
+	}
 </script>
 
 <!-- Button to trigger user creation -->

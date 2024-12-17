@@ -1,39 +1,90 @@
 {
-  "name": "sveltekit-server-functions",
-  "version": "0.1.4",
-  "description": "Allows you to create functions that run on the server in Sveltekit. ",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "type": "module",
-  "keywords": [
-    "svelte",
-    "sveltekit",
-    "preprocessor",
-    "server",
-    "functions",
-    "svelte",
-    "server",
-    "functions",
-    "svelte",
-    "server",
-    "actions"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Guandor/sveltekit-server-functions.git"
-  },
-  "homepage": "https://github.com/Guandor/sveltekit-server-functions#readme",
-  "bugs": {
-    "url": "https://github.com/Guandor/sveltekit-server-functions/issues"
-  },
-  "author": "Guandor",
-  "license": "MIT",
-  "dependencies": {
-    "estree-walker": "^3.0.0"
-  },
-  "peerDependencies": {
-    "svelte": ">=4.0.0 <6.0.0"
-  }
+	"name": "sveltekit-server-functions",
+	"version": "0.1.5",
+	"description": "Allows you to create functions that run on the server in Sveltekit. ",
+	"author": "Guandor",
+	"keywords": [
+		"svelte",
+		"sveltekit",
+		"preprocessor",
+		"server",
+		"functions",
+		"svelte",
+		"server",
+		"functions",
+		"svelte",
+		"server",
+		"actions"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Guandor/sveltekit-server-functions.git"
+	},
+	"homepage": "https://github.com/Guandor/sveltekit-server-functions#readme",
+	"bugs": {
+		"url": "https://github.com/Guandor/sveltekit-server-functions/issues"
+	},
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build && npm run package",
+		"preview": "vite preview",
+		"package": "svelte-kit sync && svelte-package && publint",
+		"prepublishOnly": "npm run package",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"format": "prettier --write .",
+		"lint": "prettier --check . && eslint .",
+		"test:unit": "vitest",
+		"test": "npm run test:unit -- --run && npm run test:e2e",
+		"test:e2e": "playwright test"
+	},
+	"files": [
+		"dist",
+		"!dist/**/*.test.*",
+		"!dist/**/*.spec.*"
+	],
+	"sideEffects": [
+		"**/*.css"
+	],
+	"svelte": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"svelte": "./dist/index.js"
+		}
+	},
+	"peerDependencies": {
+		"svelte": "^5.0.0"
+	},
+	"devDependencies": {
+		"@eslint/compat": "^1.2.3",
+		"@playwright/test": "^1.45.3",
+		"@sveltejs/adapter-auto": "^3.0.0",
+		"@sveltejs/kit": "^2.9.0",
+		"@sveltejs/package": "^2.0.0",
+		"@sveltejs/vite-plugin-svelte": "^5.0.0",
+		"@types/node": "^22.10.2",
+		"autoprefixer": "^10.4.20",
+		"eslint": "^9.7.0",
+		"eslint-config-prettier": "^9.1.0",
+		"eslint-plugin-svelte": "^2.36.0",
+		"globals": "^15.0.0",
+		"prettier": "^3.3.2",
+		"prettier-plugin-svelte": "^3.2.6",
+		"prettier-plugin-tailwindcss": "^0.6.5",
+		"publint": "^0.2.0",
+		"svelte": "^5.0.0",
+		"svelte-check": "^4.0.0",
+		"tailwindcss": "^3.4.9",
+		"typescript": "^5.0.0",
+		"typescript-eslint": "^8.0.0",
+		"vite": "^6.0.0",
+		"vitest": "^2.0.4"
+	},
+	"dependencies": {
+		"@faker-js/faker": "^9.3.0"
+	}
 }
