@@ -11,7 +11,7 @@ export default function serverFunctions() {
 	return {
 		markup: handleFile,
 		style: ({ content }) => ({ code: content }),
-		script: handleFile
+		script: handleFile,
 	};
 }
 
@@ -94,7 +94,7 @@ function generatePaths(functionName, filename) {
 
 	return {
 		apiPath: path.join(process.cwd(), 'src', 'routes', 'api', uniquePath, '+server.ts'),
-		routePath: uniquePath
+		routePath: uniquePath,
 	};
 }
 
@@ -111,7 +111,7 @@ function transformCode(content, serverFunc, routePath) {
 		.forEach((call) => {
 			const fetchCall = generateFetchCall(
 				routePath,
-				transformedContent.slice(call.arguments.start, call.arguments.end)
+				transformedContent.slice(call.arguments.start, call.arguments.end),
 			);
 
 			transformedContent =
@@ -209,10 +209,10 @@ function findFunctions(ast) {
 						name: node.id.name,
 						node,
 						start: node.start,
-						end: node.end
+						end: node.end,
 					});
 				}
-			}
+			},
 		});
 	}
 	return functions;
@@ -240,7 +240,7 @@ function extractFunctionDetails(content, serverFunc) {
 	walk(serverFunc.node, {
 		enter(node) {
 			if (node.type === 'Identifier') usedIdentifiers.add(node.name);
-		}
+		},
 	});
 
 	// Find imports that contain any of the used identifiers
@@ -253,13 +253,13 @@ function extractFunctionDetails(content, serverFunc) {
 						relevantImports.add(content.slice(node.start, node.end));
 					}
 				}
-			}
+			},
 		});
 	}
 
 	return {
 		imports: Array.from(relevantImports),
-		functionDefinition: content.slice(serverFunc.start, serverFunc.end)
+		functionDefinition: content.slice(serverFunc.start, serverFunc.end),
 	};
 }
 
@@ -274,11 +274,11 @@ function findCalls(ast, functionName) {
 					end: node.end,
 					arguments: {
 						start: node.arguments[0]?.start || node.end - 1,
-						end: node.arguments[node.arguments.length - 1]?.end || node.end - 1
-					}
+						end: node.arguments[node.arguments.length - 1]?.end || node.end - 1,
+					},
 				});
 			}
-		}
+		},
 	});
 	return calls;
 }
@@ -291,16 +291,16 @@ function findUnusedImports(ast, usedIdentifiers) {
 			enter(node) {
 				if (node.type === 'ImportDeclaration') {
 					const allSpecifiersUnused = node.specifiers.every(
-						(specifier) => !usedIdentifiers.has(specifier.local.name)
+						(specifier) => !usedIdentifiers.has(specifier.local.name),
 					);
 					if (allSpecifiersUnused) {
 						unusedImports.push({
 							start: node.start,
-							end: node.end
+							end: node.end,
 						});
 					}
 				}
-			}
+			},
 		});
 	}
 	return unusedImports;
@@ -318,7 +318,7 @@ function collectUsedIdentifiers(ast) {
 				if (node.type === 'Identifier') {
 					identifiers.add(node.name);
 				}
-			}
+			},
 		});
 	}
 	return identifiers;
