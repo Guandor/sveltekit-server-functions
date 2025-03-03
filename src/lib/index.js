@@ -2,169 +2,150 @@ import { walk } from 'estree-walker';
 import fs from 'fs';
 import path from 'path';
 import { parse } from 'svelte/compiler';
+import crypto from 'crypto';
 
+/**
+ * SvelteKit preprocessor that transforms server-side functions into API endpoints
+ */
 export default function serverFunctions() {
-	cleanupEndpoints();
-	// Run this once at startup, before SvelteKit initializes
-	const srcDir = path.join(process.cwd(), 'src');
-	scanAndCreateEndpoints(srcDir);
+	// Clean up any existing endpoints and create new ones at startup
+	const endpointManager = new EndpointManager();
+	endpointManager.cleanupEndpoints();
+	endpointManager.scanAndCreateEndpoints();
+
 	return {
-		markup: handleFile,
+		markup: ({ content, filename }) => transformFile(content, filename),
 		style: ({ content }) => ({ code: content }),
-		script: handleFile,
+		script: ({ content, filename }) => transformFile(content, filename),
 	};
 }
 
-// Recursively scans Svelte files and creates API endpoints for server functions
-function scanAndCreateEndpoints(dir) {
-	const files = fs.readdirSync(dir, { recursive: true });
-
-	files.forEach((file) => {
-		if (file.endsWith('.svelte')) {
-			const fullPath = path.join(dir, file);
-			const content = fs.readFileSync(fullPath, 'utf-8');
-			try {
-				const ast = parse(content);
-				const serverFunctions = findFunctions(ast);
-
-				serverFunctions.forEach((func) => {
-					const { apiPath } = generatePaths(func.name, fullPath);
-					createEndpoint(apiPath, content, func);
-				});
-			} catch {
-				/* Handle silently */
-			}
-		}
-	});
-}
-
-function handleFile({ content, filename }) {
+/**
+ * Handles file transformation, determining if it needs processing
+ */
+function transformFile(content, filename) {
 	try {
-		if (isSkippable(filename)) {
+		// Skip non-svelte files or files in special directories
+		if (isSkippableFile(filename) || !content.includes('async function server_')) {
 			return { code: content };
 		}
 
-		// Skip if no server functions present
-		if (!content.includes('async function server_')) {
-			return { code: content };
-		}
-
-		const result = processFunctions(content, filename);
-		return result;
-	} catch {
+		const transformer = new ServerFunctionTransformer(content, filename);
+		return { code: transformer.process() };
+	} catch (error) {
+		console.warn(`Warning: Error processing ${filename}`, error.message);
 		return { code: content };
 	}
 }
 
-function isSkippable(filename) {
-	return (
-		['.svelte-kit', 'node_modules'].some((dir) => filename.includes(dir)) ||
-		!filename.endsWith('.svelte')
-	);
-}
-
-// Removes previously generated API endpoints
-function cleanupEndpoints() {
-	const apiDir = path.join(process.cwd(), 'src', 'routes', 'api');
-	if (!fs.existsSync(apiDir)) {
-		return;
+/**
+ * Checks if a file should be skipped from processing
+ */
+function isSkippableFile(filename) {
+	if (!filename || !filename.endsWith('.svelte')) {
+		return true;
 	}
 
-	fs.readdirSync(apiDir)
-		.filter((endpoint) => endpoint.startsWith('server_'))
-		.forEach((endpoint) => {
-			const endpointPath = path.join(apiDir, endpoint);
-			if (fs.statSync(endpointPath).isDirectory()) {
-				fs.rmSync(endpointPath, { recursive: true, force: true });
+	const skipPaths = ['.svelte-kit', 'node_modules'];
+	return skipPaths.some((skipPath) => filename.includes(skipPath));
+}
+
+/**
+ * Manages API endpoints creation and cleanup
+ */
+class EndpointManager {
+	constructor() {
+		this.apiDir = path.join(process.cwd(), 'src', 'routes', 'api');
+		this.srcDir = path.join(process.cwd(), 'src');
+	}
+
+	/**
+	 * Removes previously generated API endpoints
+	 */
+	cleanupEndpoints() {
+		if (!fs.existsSync(this.apiDir)) {
+			return;
+		}
+
+		try {
+			fs.readdirSync(this.apiDir)
+				.filter((endpoint) => endpoint.startsWith('server_'))
+				.forEach((endpoint) => {
+					const endpointPath = path.join(this.apiDir, endpoint);
+					if (fs.statSync(endpointPath).isDirectory()) {
+						fs.rmSync(endpointPath, { recursive: true, force: true });
+					}
+				});
+		} catch (error) {
+			console.error('Error cleaning up endpoints:', error);
+		}
+	}
+
+	/**
+	 * Recursively scans Svelte files and creates API endpoints for server functions
+	 */
+	scanAndCreateEndpoints() {
+		try {
+			const files = fs.readdirSync(this.srcDir, { recursive: true });
+
+			files.forEach((file) => {
+				if (file.endsWith('.svelte')) {
+					const fullPath = path.join(this.srcDir, file);
+					this.processFile(fullPath);
+				}
+			});
+		} catch (error) {
+			console.error('Error scanning for server functions:', error);
+		}
+	}
+
+	/**
+	 * Processes a single file to extract server functions
+	 */
+	processFile(filePath) {
+		try {
+			const content = fs.readFileSync(filePath, 'utf-8');
+			if (!content.includes('async function server_')) {
+				return;
 			}
-		});
-}
 
-import crypto from 'crypto';
+			const ast = parse(content);
+			const serverFunctions = AstUtils.findServerFunctions(ast);
 
-// Generates unique API paths using SHA-256 hashing to prevent collisions
-function generatePaths(functionName, filename) {
-	const relativePath = filename
-		? path.relative(path.join(process.cwd(), 'src'), path.normalize(filename)).replace(/\\/g, '/')
-		: 'unknown';
+			serverFunctions.forEach((func) => {
+				const { apiPath } = PathUtils.generatePaths(func.name, filePath);
+				this.createEndpoint(apiPath, content, func);
+			});
+		} catch (error) {
+			console.warn(`Warning: Could not process ${filePath}`, error.message);
+		}
+	}
 
-	const str = `${relativePath}:${functionName}`;
-	const hash = crypto.createHash('sha256').update(str).digest('base64url').slice(0, 8);
-	const uniquePath = `${functionName}_${hash}`;
+	/**
+	 * Creates or updates an API endpoint file for a server function
+	 */
+	createEndpoint(apiPath, content, serverFunc) {
+		try {
+			const { imports, functionDefinition } = AstUtils.extractFunctionDetails(content, serverFunc);
+			const apiContent = this.generateApiContent(functionDefinition, serverFunc.name, imports);
 
-	return {
-		apiPath: path.join(process.cwd(), 'src', 'routes', 'api', uniquePath, '+server.ts'),
-		routePath: uniquePath,
-	};
-}
+			// Ensure directory exists
+			fs.mkdirSync(path.dirname(apiPath), { recursive: true });
 
-function transformCode(content, serverFunc, routePath) {
-	// First, collect all calls to the server function
-	const freshAst = parse(content);
-	const calls = findCalls(freshAst, serverFunc.name);
+			// Only write if file doesn't exist or content has changed
+			if (!fs.existsSync(apiPath) || fs.readFileSync(apiPath, 'utf-8') !== apiContent) {
+				fs.writeFileSync(apiPath, apiContent);
+			}
+		} catch (error) {
+			console.error(`Error creating endpoint for ${serverFunc.name}:`, error);
+		}
+	}
 
-	let transformedContent = content;
-
-	// Transform all calls to fetch
-	calls
-		.sort((a, b) => b.start - a.start)
-		.forEach((call) => {
-			const fetchCall = generateFetchCall(
-				routePath,
-				transformedContent.slice(call.arguments.start, call.arguments.end),
-			);
-
-			transformedContent =
-				transformedContent.slice(0, call.start) + fetchCall + transformedContent.slice(call.end);
-		});
-
-	// Remove the original function definition
-	transformedContent =
-		transformedContent.slice(0, serverFunc.start).trimEnd() +
-		'\n' +
-		transformedContent.slice(serverFunc.end).trimStart();
-
-	// Now that the function is removed, parse again and check for truly used identifiers
-	const finalAst = parse(transformedContent);
-	const usedIdentifiers = collectUsedIdentifiers(finalAst);
-
-	const unusedImports = findUnusedImports(finalAst, usedIdentifiers);
-
-	// Remove unused imports
-	unusedImports
-		.sort((a, b) => b.start - a.start)
-		.forEach((importNode) => {
-			transformedContent =
-				transformedContent.slice(0, importNode.start).trimEnd() +
-				'\n' +
-				transformedContent.slice(importNode.end).trimStart();
-		});
-
-	return transformedContent;
-}
-
-// Generates a fetch call that matches the original function signature
-function generateFetchCall(routePath, params) {
-	const payloadStr = params.trim()
-		? `{${params
-				.split(',')
-				.map((p, i) => `"${i}": ${p.trim()}`)
-				.join(',')}}`
-		: '{}';
-
-	return `fetch('/api/${routePath}', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(${payloadStr})
-    }).then(response => {
-        if (!response.ok) throw new Error('API call failed: ' + response.statusText);
-        return response.json();
-    })`;
-}
-
-// Generates the API endpoint file content with proper TypeScript types
-function generateApiContent(functionDefinition, functionName, imports) {
-	return `${imports.join('\n')}
+	/**
+	 * Generates the API endpoint file content with proper TypeScript types
+	 */
+	generateApiContent(functionDefinition, functionName, imports) {
+		return `${imports.join('\n')}
 
 import { json } from '@sveltejs/kit';
 
@@ -175,29 +156,125 @@ export async function POST({ request }) {
     const result = await ${functionName}(...args);
     return json(result);
 }`;
+	}
 }
 
-// Main processing function that handles the transformation of server functions
-function processFunctions(content, filename) {
-	const ast = parse(content);
-	const serverFunctions = findFunctions(ast);
+/**
+ * Handles the transformation of Svelte file content
+ */
+class ServerFunctionTransformer {
+	constructor(content, filename) {
+		this.content = content;
+		this.filename = filename;
+		this.ast = parse(content);
+	}
 
-	serverFunctions
-		.sort((a, b) => b.start - a.start)
-		.forEach((func) => {
-			const { apiPath, routePath } = generatePaths(func.name, filename);
-			createEndpoint(apiPath, content, func);
-			content = transformCode(content, func, routePath);
-			parse(content);
-		});
+	/**
+	 * Process the file content to transform server functions
+	 */
+	process() {
+		const serverFunctions = AstUtils.findServerFunctions(this.ast);
 
-	return { code: content };
+		// If no server functions are found, return the original content
+		if (serverFunctions.length === 0) {
+			return this.content;
+		}
+
+		// Sort in reverse order to avoid affecting positions when modifying the content
+		serverFunctions
+			.sort((a, b) => b.start - a.start)
+			.forEach((func) => {
+				const { routePath } = PathUtils.generatePaths(func.name, this.filename);
+				this.transformServerFunction(func, routePath);
+			});
+
+		return this.content;
+	}
+
+	/**
+	 * Transform a single server function and its calls
+	 */
+	transformServerFunction(serverFunc, routePath) {
+		// First, find all calls to the server function
+		const calls = AstUtils.findFunctionCalls(this.ast, serverFunc.name);
+
+		// Transform all calls to fetch (in reverse order to maintain positions)
+		calls
+			.sort((a, b) => b.start - a.start)
+			.forEach((call) => {
+				const argsText = this.content.slice(call.arguments.start, call.arguments.end);
+				const fetchCall = this.generateFetchCall(routePath, argsText);
+				this.content = this.content.slice(0, call.start) + fetchCall + this.content.slice(call.end);
+			});
+
+		// Remove the original function definition
+		this.content =
+			this.content.slice(0, serverFunc.start).trimEnd() +
+			'\n' +
+			this.content.slice(serverFunc.end).trimStart();
+
+		// Update the AST and clean up unused imports
+		this.cleanupUnusedImports();
+	}
+
+	/**
+	 * Generates a fetch call that replaces the original function call
+	 */
+	generateFetchCall(routePath, params) {
+		const payloadStr = params.trim()
+			? `{${params
+					.split(',')
+					.map((p, i) => `"${i}": ${p.trim()}`)
+					.join(',')}}`
+			: '{}';
+
+		return `fetch('/api/${routePath}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(${payloadStr})
+    }).then(response => {
+        if (!response.ok) throw new Error('API call failed: ' + response.statusText);
+        return response.json();
+    })`;
+	}
+
+	/**
+	 * Clean up imports that are no longer used after removing server functions
+	 */
+	cleanupUnusedImports() {
+		try {
+			// Re-parse the modified content to get updated AST
+			const updatedAst = parse(this.content);
+			const usedIdentifiers = AstUtils.collectUsedIdentifiers(updatedAst);
+			const unusedImports = AstUtils.findUnusedImports(updatedAst, usedIdentifiers);
+
+			// Remove unused imports (in reverse order to maintain positions)
+			unusedImports
+				.sort((a, b) => b.start - a.start)
+				.forEach((importNode) => {
+					this.content =
+						this.content.slice(0, importNode.start).trimEnd() +
+						'\n' +
+						this.content.slice(importNode.end).trimStart();
+				});
+		} catch (error) {
+			console.warn('Warning: Error cleaning up imports', error.message);
+		}
+	}
 }
 
-// Finds all async functions that start with 'server_'
-function findFunctions(ast) {
-	const functions = [];
-	if (ast.instance) {
+/**
+ * Utility functions for AST operations
+ */
+class AstUtils {
+	/**
+	 * Finds all async functions that start with 'server_'
+	 */
+	static findServerFunctions(ast) {
+		const functions = [];
+
+		if (!ast.instance) return functions;
+
 		walk(ast.instance.content, {
 			enter(node) {
 				if (
@@ -214,79 +291,102 @@ function findFunctions(ast) {
 				}
 			},
 		});
+
+		return functions;
 	}
-	return functions;
-}
 
-// Creates or updates the API endpoint file
-function createEndpoint(apiPath, content, serverFunc) {
-	const { imports, functionDefinition } = extractFunctionDetails(content, serverFunc);
-	const apiContent = generateApiContent(functionDefinition, serverFunc.name, imports);
+	/**
+	 * Finds all calls to a specific function
+	 */
+	static findFunctionCalls(ast, functionName) {
+		const calls = [];
 
-	fs.mkdirSync(path.dirname(apiPath), { recursive: true });
-
-	if (!fs.existsSync(apiPath) || fs.readFileSync(apiPath, 'utf-8') !== apiContent) {
-		fs.writeFileSync(apiPath, apiContent);
-	}
-}
-
-// Extracts the function definition and its required imports
-function extractFunctionDetails(content, serverFunc) {
-	const ast = parse(content);
-	const relevantImports = new Set();
-	const usedIdentifiers = new Set();
-
-	// Find all identifiers used in the function
-	walk(serverFunc.node, {
-		enter(node) {
-			if (node.type === 'Identifier') usedIdentifiers.add(node.name);
-		},
-	});
-
-	// Find imports that contain any of the used identifiers
-	if (ast.instance) {
-		walk(ast.instance.content, {
+		walk(ast, {
 			enter(node) {
-				if (node.type === 'ImportDeclaration') {
-					const importedNames = node.specifiers.map((specifier) => specifier.local.name);
-					if (importedNames.some((name) => usedIdentifiers.has(name))) {
-						relevantImports.add(content.slice(node.start, node.end));
-					}
+				if (node.type === 'CallExpression' && node.callee?.name === functionName) {
+					calls.push({
+						start: node.start,
+						end: node.end,
+						arguments: {
+							start: node.arguments[0]?.start || node.end - 1,
+							end: node.arguments[node.arguments.length - 1]?.end || node.end - 1,
+						},
+					});
 				}
 			},
 		});
+
+		return calls;
 	}
 
-	return {
-		imports: Array.from(relevantImports),
-		functionDefinition: content.slice(serverFunc.start, serverFunc.end),
-	};
-}
+	/**
+	 * Extracts the function definition and its required imports
+	 */
+	static extractFunctionDetails(content, serverFunc) {
+		const ast = parse(content);
+		const relevantImports = new Set();
+		const usedIdentifiers = new Set();
 
-// Finds all calls to a specific function in the AST
-function findCalls(ast, functionName) {
-	const calls = [];
-	walk(ast, {
-		enter(node) {
-			if (node.type === 'CallExpression' && node.callee?.name === functionName) {
-				calls.push({
-					start: node.start,
-					end: node.end,
-					arguments: {
-						start: node.arguments[0]?.start || node.end - 1,
-						end: node.arguments[node.arguments.length - 1]?.end || node.end - 1,
-					},
-				});
-			}
-		},
-	});
-	return calls;
-}
+		// Find all identifiers used in the function
+		walk(serverFunc.node, {
+			enter(node) {
+				if (node.type === 'Identifier') {
+					usedIdentifiers.add(node.name);
+				}
+			},
+		});
 
-// Helper function to find imports that are no longer used
-function findUnusedImports(ast, usedIdentifiers) {
-	const unusedImports = [];
-	if (ast.instance) {
+		// Find imports that contain any of the used identifiers
+		if (ast.instance) {
+			walk(ast.instance.content, {
+				enter(node) {
+					if (node.type === 'ImportDeclaration') {
+						const importedNames = node.specifiers.map((specifier) => specifier.local.name);
+						if (importedNames.some((name) => usedIdentifiers.has(name))) {
+							relevantImports.add(content.slice(node.start, node.end));
+						}
+					}
+				},
+			});
+		}
+
+		return {
+			imports: Array.from(relevantImports),
+			functionDefinition: content.slice(serverFunc.start, serverFunc.end),
+		};
+	}
+
+	/**
+	 * Collects all identifiers used in the instance script
+	 */
+	static collectUsedIdentifiers(ast) {
+		const identifiers = new Set();
+
+		if (!ast.instance) return identifiers;
+
+		walk(ast.instance.content, {
+			enter(node, parent) {
+				// Skip import declarations and their children
+				if (node.type === 'ImportDeclaration' || (parent && parent.type === 'ImportDeclaration')) {
+					return this.skip();
+				}
+				if (node.type === 'Identifier') {
+					identifiers.add(node.name);
+				}
+			},
+		});
+
+		return identifiers;
+	}
+
+	/**
+	 * Finds imports that are no longer used
+	 */
+	static findUnusedImports(ast, usedIdentifiers) {
+		const unusedImports = [];
+
+		if (!ast.instance) return unusedImports;
+
 		walk(ast.instance.content, {
 			enter(node) {
 				if (node.type === 'ImportDeclaration') {
@@ -302,24 +402,30 @@ function findUnusedImports(ast, usedIdentifiers) {
 				}
 			},
 		});
+
+		return unusedImports;
 	}
-	return unusedImports;
 }
 
-function collectUsedIdentifiers(ast) {
-	const identifiers = new Set();
-	if (ast.instance) {
-		walk(ast.instance.content, {
-			enter(node, parent) {
-				// Skip import declarations and their children
-				if (node.type === 'ImportDeclaration' || (parent && parent.type === 'ImportDeclaration')) {
-					return this.skip();
-				}
-				if (node.type === 'Identifier') {
-					identifiers.add(node.name);
-				}
-			},
-		});
+/**
+ * Utilities for path generation and management
+ */
+class PathUtils {
+	/**
+	 * Generates unique API paths for server functions
+	 */
+	static generatePaths(functionName, filename) {
+		const relativePath = filename
+			? path.relative(path.join(process.cwd(), 'src'), path.normalize(filename)).replace(/\\/g, '/')
+			: 'unknown';
+
+		const str = `${relativePath}:${functionName}`;
+		const hash = crypto.createHash('sha256').update(str).digest('base64url').slice(0, 8);
+		const uniquePath = `${functionName}_${hash}`;
+
+		return {
+			apiPath: path.join(process.cwd(), 'src', 'routes', 'api', uniquePath, '+server.ts'),
+			routePath: uniquePath,
+		};
 	}
-	return identifiers;
 }
