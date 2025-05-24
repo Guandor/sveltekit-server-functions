@@ -1,8 +1,66 @@
-import { walk } from 'estree-walker';
-import fs from 'fs';
-import path from 'path';
-import { parse } from 'svelte/compiler';
-import crypto from 'crypto';
+import { walk, type Node } from 'estree-walker';
+import * as fs from 'fs';
+import * as path from 'path';
+import { parse, type AST } from 'svelte/compiler';
+import * as crypto from 'crypto';
+
+// Define SvelteNode type for Svelte AST nodes
+interface SvelteNode {
+	type: string;
+	start: number;
+	end: number;
+	async?: boolean;
+	id?: {
+		name: string;
+	};
+	callee?: {
+		name: string;
+	};
+	arguments: any[];
+	specifiers: any[];
+	[key: string]: any;
+}
+
+// Type definitions
+interface PreprocessorResult {
+	code: string;
+}
+
+interface PreprocessorContext {
+	content: string;
+	filename?: string;
+}
+
+interface ServerFunction {
+	name: string;
+	node: SvelteNode;
+	start: number;
+	end: number;
+}
+
+interface FunctionCall {
+	start: number;
+	end: number;
+	arguments: {
+		start: number;
+		end: number;
+	};
+}
+
+interface FunctionDetails {
+	imports: string[];
+	functionDefinition: string;
+}
+
+interface PathResult {
+	apiPath: string;
+	routePath: string;
+}
+
+interface ImportNode {
+	start: number;
+	end: number;
+}
 
 /**
  * SvelteKit preprocessor that transforms server-side functions into API endpoints
@@ -14,16 +72,16 @@ export default function serverFunctions() {
 	endpointManager.scanAndCreateEndpoints();
 
 	return {
-		markup: ({ content, filename }) => transformFile(content, filename),
-		style: ({ content }) => ({ code: content }),
-		script: ({ content, filename }) => transformFile(content, filename),
+		markup: ({ content, filename }: PreprocessorContext): PreprocessorResult => transformFile(content, filename),
+		style: ({ content }: PreprocessorContext): PreprocessorResult => ({ code: content }),
+		script: ({ content, filename }: PreprocessorContext): PreprocessorResult => transformFile(content, filename),
 	};
 }
 
 /**
  * Handles file transformation, determining if it needs processing
  */
-function transformFile(content, filename) {
+function transformFile(content: string, filename?: string): PreprocessorResult {
 	try {
 		// Skip non-svelte files or files in special directories
 		if (isSkippableFile(filename) || !content.includes('async function server_')) {
@@ -32,8 +90,9 @@ function transformFile(content, filename) {
 
 		const transformer = new ServerFunctionTransformer(content, filename);
 		return { code: transformer.process() };
-	} catch (error) {
-		console.warn(`Warning: Error processing ${filename}`, error.message);
+	} catch (error: unknown) {
+		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+		console.warn(`Warning: Error processing ${filename}`, errorMessage);
 		return { code: content };
 	}
 }
@@ -41,7 +100,7 @@ function transformFile(content, filename) {
 /**
  * Checks if a file should be skipped from processing
  */
-function isSkippableFile(filename) {
+function isSkippableFile(filename?: string): boolean {
 	if (!filename || !filename.endsWith('.svelte')) {
 		return true;
 	}
@@ -54,6 +113,9 @@ function isSkippableFile(filename) {
  * Manages API endpoints creation and cleanup
  */
 class EndpointManager {
+	private readonly apiDir: string;
+	private readonly srcDir: string;
+
 	constructor() {
 		this.apiDir = path.join(process.cwd(), 'src', 'routes', 'api');
 		this.srcDir = path.join(process.cwd(), 'src');
@@ -62,21 +124,21 @@ class EndpointManager {
 	/**
 	 * Removes previously generated API endpoints
 	 */
-	cleanupEndpoints() {
+	cleanupEndpoints(): void {
 		if (!fs.existsSync(this.apiDir)) {
 			return;
 		}
 
 		try {
 			fs.readdirSync(this.apiDir)
-				.filter((endpoint) => endpoint.startsWith('server_'))
-				.forEach((endpoint) => {
+				.filter((endpoint: string) => endpoint.startsWith('server_'))
+				.forEach((endpoint: string) => {
 					const endpointPath = path.join(this.apiDir, endpoint);
 					if (fs.statSync(endpointPath).isDirectory()) {
 						fs.rmSync(endpointPath, { recursive: true, force: true });
 					}
 				});
-		} catch (error) {
+		} catch (error: unknown) {
 			console.error('Error cleaning up endpoints:', error);
 		}
 	}
@@ -84,17 +146,17 @@ class EndpointManager {
 	/**
 	 * Recursively scans Svelte files and creates API endpoints for server functions
 	 */
-	scanAndCreateEndpoints() {
+	scanAndCreateEndpoints(): void {
 		try {
-			const files = fs.readdirSync(this.srcDir, { recursive: true });
+			const files = fs.readdirSync(this.srcDir, { recursive: true }) as string[];
 
-			files.forEach((file) => {
+			files.forEach((file: string) => {
 				if (file.endsWith('.svelte')) {
 					const fullPath = path.join(this.srcDir, file);
 					this.processFile(fullPath);
 				}
 			});
-		} catch (error) {
+		} catch (error: unknown) {
 			console.error('Error scanning for server functions:', error);
 		}
 	}
@@ -102,29 +164,30 @@ class EndpointManager {
 	/**
 	 * Processes a single file to extract server functions
 	 */
-	processFile(filePath) {
+	processFile(filePath: string): void {
 		try {
 			const content = fs.readFileSync(filePath, 'utf-8');
 			if (!content.includes('async function server_')) {
 				return;
 			}
 
-			const ast = parse(content);
+			const ast = parse(content, { modern: true });
 			const serverFunctions = AstUtils.findServerFunctions(ast);
 
-			serverFunctions.forEach((func) => {
+			serverFunctions.forEach((func: ServerFunction) => {
 				const { apiPath } = PathUtils.generatePaths(func.name, filePath);
 				this.createEndpoint(apiPath, content, func);
 			});
-		} catch (error) {
-			console.warn(`Warning: Could not process ${filePath}`, error.message);
+		} catch (error: unknown) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			console.warn(`Warning: Could not process ${filePath}`, errorMessage);
 		}
 	}
 
 	/**
 	 * Creates or updates an API endpoint file for a server function
 	 */
-	createEndpoint(apiPath, content, serverFunc) {
+	createEndpoint(apiPath: string, content: string, serverFunc: ServerFunction): void {
 		try {
 			const { imports, functionDefinition } = AstUtils.extractFunctionDetails(content, serverFunc);
 			const apiContent = this.generateApiContent(functionDefinition, serverFunc.name, imports);
@@ -136,7 +199,7 @@ class EndpointManager {
 			if (!fs.existsSync(apiPath) || fs.readFileSync(apiPath, 'utf-8') !== apiContent) {
 				fs.writeFileSync(apiPath, apiContent);
 			}
-		} catch (error) {
+		} catch (error: unknown) {
 			console.error(`Error creating endpoint for ${serverFunc.name}:`, error);
 		}
 	}
@@ -144,18 +207,19 @@ class EndpointManager {
 	/**
 	 * Generates the API endpoint file content with proper TypeScript types
 	 */
-	generateApiContent(functionDefinition, functionName, imports) {
+	generateApiContent(functionDefinition: string, functionName: string, imports: string[]): string {
 		return `${imports.join('\n')}
 
 import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 
-export async function POST({ request }) {
+export const POST: RequestHandler = async ({ request }) => {
     ${functionDefinition}
     const payload: Record<string, unknown> = await request.json();
     const args = Object.values(payload) as Parameters<typeof ${functionName}>;
     const result = await ${functionName}(...args);
     return json(result);
-}`;
+};`;
 	}
 }
 
@@ -163,16 +227,20 @@ export async function POST({ request }) {
  * Handles the transformation of Svelte file content
  */
 class ServerFunctionTransformer {
-	constructor(content, filename) {
+	private content: string;
+	private readonly filename?: string;
+	private ast: AST.Root;
+
+	constructor(content: string, filename?: string) {
 		this.content = content;
 		this.filename = filename;
-		this.ast = parse(content);
+		this.ast = parse(content, { modern: true });
 	}
 
 	/**
 	 * Process the file content to transform server functions
 	 */
-	process() {
+	process(): string {
 		const serverFunctions = AstUtils.findServerFunctions(this.ast);
 
 		// If no server functions are found, return the original content
@@ -182,8 +250,8 @@ class ServerFunctionTransformer {
 
 		// Sort in reverse order to avoid affecting positions when modifying the content
 		serverFunctions
-			.sort((a, b) => b.start - a.start)
-			.forEach((func) => {
+			.sort((a: ServerFunction, b: ServerFunction) => b.start - a.start)
+			.forEach((func: ServerFunction) => {
 				const { routePath } = PathUtils.generatePaths(func.name, this.filename);
 				this.transformServerFunction(func, routePath);
 			});
@@ -194,14 +262,14 @@ class ServerFunctionTransformer {
 	/**
 	 * Transform a single server function and its calls
 	 */
-	transformServerFunction(serverFunc, routePath) {
+	transformServerFunction(serverFunc: ServerFunction, routePath: string): void {
 		// First, find all calls to the server function
 		const calls = AstUtils.findFunctionCalls(this.ast, serverFunc.name);
 
 		// Transform all calls to fetch (in reverse order to maintain positions)
 		calls
-			.sort((a, b) => b.start - a.start)
-			.forEach((call) => {
+			.sort((a: FunctionCall, b: FunctionCall) => b.start - a.start)
+			.forEach((call: FunctionCall) => {
 				const argsText = this.content.slice(call.arguments.start, call.arguments.end);
 				const fetchCall = this.generateFetchCall(routePath, argsText);
 				this.content = this.content.slice(0, call.start) + fetchCall + this.content.slice(call.end);
@@ -220,12 +288,12 @@ class ServerFunctionTransformer {
 	/**
 	 * Generates a fetch call that replaces the original function call
 	 */
-	generateFetchCall(routePath, params) {
+	generateFetchCall(routePath: string, params: string): string {
 		const payloadStr = params.trim()
 			? `{${params
-					.split(',')
-					.map((p, i) => `"${i}": ${p.trim()}`)
-					.join(',')}}`
+				.split(',')
+				.map((p: string, i: number) => `"${i}": ${p.trim()}`)
+				.join(',')}}`
 			: '{}';
 
 		return `fetch('/api/${routePath}', {
@@ -241,24 +309,25 @@ class ServerFunctionTransformer {
 	/**
 	 * Clean up imports that are no longer used after removing server functions
 	 */
-	cleanupUnusedImports() {
+	cleanupUnusedImports(): void {
 		try {
 			// Re-parse the modified content to get updated AST
-			const updatedAst = parse(this.content);
+			const updatedAst = parse(this.content, { modern: true });
 			const usedIdentifiers = AstUtils.collectUsedIdentifiers(updatedAst);
 			const unusedImports = AstUtils.findUnusedImports(updatedAst, usedIdentifiers);
 
 			// Remove unused imports (in reverse order to maintain positions)
 			unusedImports
-				.sort((a, b) => b.start - a.start)
-				.forEach((importNode) => {
+				.sort((a: ImportNode, b: ImportNode) => b.start - a.start)
+				.forEach((importNode: ImportNode) => {
 					this.content =
 						this.content.slice(0, importNode.start).trimEnd() +
 						'\n' +
 						this.content.slice(importNode.end).trimStart();
 				});
-		} catch (error) {
-			console.warn('Warning: Error cleaning up imports', error.message);
+		} catch (error: unknown) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			console.warn('Warning: Error cleaning up imports', errorMessage);
 		}
 	}
 }
@@ -270,13 +339,13 @@ class AstUtils {
 	/**
 	 * Finds all async functions that start with 'server_'
 	 */
-	static findServerFunctions(ast) {
-		const functions = [];
+	static findServerFunctions(ast: AST.Root): ServerFunction[] {
+		const functions: ServerFunction[] = [];
 
 		if (!ast.instance) return functions;
 
 		walk(ast.instance.content, {
-			enter(node) {
+			enter(node: any) {
 				if (
 					node.type === 'FunctionDeclaration' &&
 					node.async &&
@@ -284,7 +353,7 @@ class AstUtils {
 				) {
 					functions.push({
 						name: node.id.name,
-						node,
+						node: node as SvelteNode,
 						start: node.start,
 						end: node.end,
 					});
@@ -298,23 +367,43 @@ class AstUtils {
 	/**
 	 * Finds all calls to a specific function
 	 */
-	static findFunctionCalls(ast, functionName) {
-		const calls = [];
+	static findFunctionCalls(ast: AST.Root, functionName: string): FunctionCall[] {
+		const calls: FunctionCall[] = [];
 
-		walk(ast, {
-			enter(node) {
-				if (node.type === 'CallExpression' && node.callee?.name === functionName) {
-					calls.push({
-						start: node.start,
-						end: node.end,
-						arguments: {
-							start: node.arguments[0]?.start || node.end - 1,
-							end: node.arguments[node.arguments.length - 1]?.end || node.end - 1,
-						},
-					});
-				}
-			},
-		});
+		// Walk through all parts of the AST
+		if (ast.fragment) {
+			walk(ast.fragment as unknown as Node, {
+				enter(node: Node) {
+					if (node.type === 'CallExpression' && (node as any).callee?.name === functionName) {
+						calls.push({
+							start: (node as any).start,
+							end: (node as any).end,
+							arguments: {
+								start: (node as any).arguments[0]?.start || (node as any).end - 1,
+								end: (node as any).arguments[(node as any).arguments.length - 1]?.end || (node as any).end - 1,
+							},
+						});
+					}
+				},
+			});
+		}
+
+		if (ast.instance) {
+			walk(ast.instance.content as Node, {
+				enter(node: Node) {
+					if (node.type === 'CallExpression' && (node as any).callee?.name === functionName) {
+						calls.push({
+							start: (node as any).start,
+							end: (node as any).end,
+							arguments: {
+								start: (node as any).arguments[0]?.start || (node as any).end - 1,
+								end: (node as any).arguments[(node as any).arguments.length - 1]?.end || (node as any).end - 1,
+							},
+						});
+					}
+				},
+			});
+		}
 
 		return calls;
 	}
@@ -322,14 +411,14 @@ class AstUtils {
 	/**
 	 * Extracts the function definition and its required imports
 	 */
-	static extractFunctionDetails(content, serverFunc) {
-		const ast = parse(content);
-		const relevantImports = new Set();
-		const usedIdentifiers = new Set();
+	static extractFunctionDetails(content: string, serverFunc: ServerFunction): FunctionDetails {
+		const ast = parse(content, { modern: true });
+		const relevantImports = new Set<string>();
+		const usedIdentifiers = new Set<string>();
 
 		// Find all identifiers used in the function
-		walk(serverFunc.node, {
-			enter(node) {
+		walk(serverFunc.node as any, {
+			enter(node: any) {
 				if (node.type === 'Identifier') {
 					usedIdentifiers.add(node.name);
 				}
@@ -339,10 +428,10 @@ class AstUtils {
 		// Find imports that contain any of the used identifiers
 		if (ast.instance) {
 			walk(ast.instance.content, {
-				enter(node) {
+				enter(node: any) {
 					if (node.type === 'ImportDeclaration') {
-						const importedNames = node.specifiers.map((specifier) => specifier.local.name);
-						if (importedNames.some((name) => usedIdentifiers.has(name))) {
+						const importedNames = node.specifiers.map((specifier: any) => specifier.local.name);
+						if (importedNames.some((name: string) => usedIdentifiers.has(name))) {
 							relevantImports.add(content.slice(node.start, node.end));
 						}
 					}
@@ -359,13 +448,13 @@ class AstUtils {
 	/**
 	 * Collects all identifiers used in the instance script
 	 */
-	static collectUsedIdentifiers(ast) {
-		const identifiers = new Set();
+	static collectUsedIdentifiers(ast: AST.Root): Set<string> {
+		const identifiers = new Set<string>();
 
 		if (!ast.instance) return identifiers;
 
 		walk(ast.instance.content, {
-			enter(node, parent) {
+			enter(node: any, parent?: any) {
 				// Skip import declarations and their children
 				if (node.type === 'ImportDeclaration' || (parent && parent.type === 'ImportDeclaration')) {
 					return this.skip();
@@ -382,16 +471,16 @@ class AstUtils {
 	/**
 	 * Finds imports that are no longer used
 	 */
-	static findUnusedImports(ast, usedIdentifiers) {
-		const unusedImports = [];
+	static findUnusedImports(ast: AST.Root, usedIdentifiers: Set<string>): ImportNode[] {
+		const unusedImports: ImportNode[] = [];
 
 		if (!ast.instance) return unusedImports;
 
 		walk(ast.instance.content, {
-			enter(node) {
+			enter(node: any) {
 				if (node.type === 'ImportDeclaration') {
 					const allSpecifiersUnused = node.specifiers.every(
-						(specifier) => !usedIdentifiers.has(specifier.local.name),
+						(specifier: any) => !usedIdentifiers.has(specifier.local.name),
 					);
 					if (allSpecifiersUnused) {
 						unusedImports.push({
@@ -414,7 +503,7 @@ class PathUtils {
 	/**
 	 * Generates unique API paths for server functions
 	 */
-	static generatePaths(functionName, filename) {
+	static generatePaths(functionName: string, filename?: string): PathResult {
 		const relativePath = filename
 			? path.relative(path.join(process.cwd(), 'src'), path.normalize(filename)).replace(/\\/g, '/')
 			: 'unknown';

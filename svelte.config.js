@@ -1,6 +1,6 @@
 import adapter from '@sveltejs/adapter-auto';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
-import serverFunctions from './src/lib/index.js';
+import serverFunctions from './src/lib/index.ts';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
